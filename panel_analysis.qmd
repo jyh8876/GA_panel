@@ -1,0 +1,688 @@
+---
+title: "Mis-selling, Lapse and Planner Settlement: Panel Analysis with Residual Diagnostics"
+subtitle: "Korean insurers, company-level, 2021--2025 (FSS + KNIA disclosures)"
+date: "2026-10-05"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    embed-resources: true
+    code-fold: show
+    fig-width: 7
+    fig-height: 4.5
+execute:
+  warning: false
+  message: false
+---
+
+# Overview
+
+This document reproduces the company-level panel study and adds a full **residual analysis** of the
+preferred two-way fixed-effects (TWFE) models. The raw data are hard-coded below, so the file runs on its own
+with no downloads.
+
+* **Sources.** FSS insurance company disclosure, "contract management": planner settlement rate and
+  13th/25th-month persistency, calendar years 2021--2025. KNIA consumer portal: item 04, the mis-selling
+  rate (half-year all-channel rates, averaged to years); item 07, the long-term claim denial rate and the
+  post-claim cancellation rate, summed counts.
+* **Units.** `settle`, `p13`, `p25`, `deny_rate` and `post_claim_cxl_rate` are in %. `ms` is in % (0.01 = 1 basis point).
+  `claims` is the number of long-term claims (KNIA item 07).
+* **Coverage.** KNIA covers non-life insurers only. Mis-selling is therefore `NA` for life insurers, and the
+  life sample is used only for settlement vs. lapse.
+
+# Setup
+
+```{r setup}
+pkgs <- c("plm", "lmtest", "sandwich")
+for (p in pkgs) if (!requireNamespace(p, quietly = TRUE)) install.packages(p, repos = "https://cloud.r-project.org")
+library(plm); library(lmtest); library(sandwich)
+set.seed(20261005)
+pal <- c(blue = "#2a78d6", orange = "#eb6834", aqua = "#1baf7a", yellow = "#eda100", grey = "#52514e")
+op <- par(no.readonly = TRUE)
+```
+
+# Raw data (hard-coded)
+
+Values are as published. Zeros that mean "not applicable" are cleaned in the next section, not here.
+
+```{r raw-data}
+raw <- read.csv(text = "
+sector,company,year,settle,p13,p25,ms,deny_rate,post_claim_cxl_rate,claims
+life,ABL,2021,60.0,81.8,68.3,NA,NA,NA,NA
+life,ABL,2022,64.2,81.6,65.5,NA,NA,NA,NA
+life,ABL,2023,74.6,85.8,58.1,NA,NA,NA,NA
+life,ABL,2024,81.5,89.6,69.0,NA,NA,NA,NA
+life,ABL,2025,80.1,90.0,77.7,NA,NA,NA,NA
+life,AIA,2021,30.5,79.7,63.9,NA,NA,NA,NA
+life,AIA,2022,30.5,79.2,65.4,NA,NA,NA,NA
+life,AIA,2023,19.6,80.3,64.5,NA,NA,NA,NA
+life,AIA,2024,34.7,81.9,64.9,NA,NA,NA,NA
+life,AIA,2025,30.7,81.3,66.3,NA,NA,NA,NA
+life,BNP_Cardif_Life,2021,NA,68.6,31.5,NA,NA,NA,NA
+life,BNP_Cardif_Life,2022,NA,84.0,50.6,NA,NA,NA,NA
+life,BNP_Cardif_Life,2023,NA,77.1,59.3,NA,NA,NA,NA
+life,BNP_Cardif_Life,2024,NA,84.5,49.1,NA,NA,NA,NA
+life,BNP_Cardif_Life,2025,NA,68.5,69.4,NA,NA,NA,NA
+life,DB_Life,2021,34.9,82.8,62.0,NA,NA,NA,NA
+life,DB_Life,2022,40.4,85.4,63.0,NA,NA,NA,NA
+life,DB_Life,2023,35.3,87.5,69.2,NA,NA,NA,NA
+life,DB_Life,2024,45.2,90.3,72.0,NA,NA,NA,NA
+life,DB_Life,2025,43.5,91.1,77.8,NA,NA,NA,NA
+life,IBK_Pension,2021,NA,87.1,77.0,NA,NA,NA,NA
+life,IBK_Pension,2022,NA,86.4,76.0,NA,NA,NA,NA
+life,IBK_Pension,2023,NA,76.1,67.8,NA,NA,NA,NA
+life,IBK_Pension,2024,NA,87.8,65.0,NA,NA,NA,NA
+life,IBK_Pension,2025,NA,91.2,73.3,NA,NA,NA,NA
+life,KB_Life,2021,20.8,80.4,63.1,NA,NA,NA,NA
+life,KB_Life,2022,NA,89.6,69.1,NA,NA,NA,NA
+life,KB_Life,2023,NA,78.1,55.3,NA,NA,NA,NA
+life,KB_Life,2024,NA,89.9,61.2,NA,NA,NA,NA
+life,KB_Life,2025,33.3,86.5,75.7,NA,NA,NA,NA
+life,KDB_Life,2021,29.5,81.1,67.5,NA,NA,NA,NA
+life,KDB_Life,2022,24.4,83.9,66.8,NA,NA,NA,NA
+life,KDB_Life,2023,31.4,87.4,69.6,NA,NA,NA,NA
+life,KDB_Life,2024,21.4,89.3,74.3,NA,NA,NA,NA
+life,KDB_Life,2025,29.2,90.5,77.6,NA,NA,NA,NA
+life,iM_Life,2021,7.1,80.5,65.8,NA,NA,NA,NA
+life,iM_Life,2022,NA,86.2,67.7,NA,NA,NA,NA
+life,iM_Life,2023,NA,88.2,77.5,NA,NA,NA,NA
+life,iM_Life,2024,NA,91.6,67.4,NA,NA,NA,NA
+life,iM_Life,2025,NA,91.8,81.4,NA,NA,NA,NA
+life,Kyobo,2021,41.2,82.3,65.2,NA,NA,NA,NA
+life,Kyobo,2022,39.3,81.7,66.4,NA,NA,NA,NA
+life,Kyobo,2023,40.8,76.4,46.8,NA,NA,NA,NA
+life,Kyobo,2024,47.3,88.2,64.7,NA,NA,NA,NA
+life,Kyobo,2025,49.4,90.2,75.0,NA,NA,NA,NA
+life,Kyobo_LifePlanet,2021,NA,88.2,80.1,NA,NA,NA,NA
+life,Kyobo_LifePlanet,2022,NA,88.1,82.2,NA,NA,NA,NA
+life,Kyobo_LifePlanet,2023,NA,65.0,28.4,NA,NA,NA,NA
+life,Kyobo_LifePlanet,2024,NA,91.9,57.1,NA,NA,NA,NA
+life,Kyobo_LifePlanet,2025,NA,85.0,88.2,NA,NA,NA,NA
+life,NH_Life,2021,26.6,83.2,69.0,NA,NA,NA,NA
+life,NH_Life,2022,18.8,83.0,71.9,NA,NA,NA,NA
+life,NH_Life,2023,21.2,82.9,69.1,NA,NA,NA,NA
+life,NH_Life,2024,37.2,88.8,74.6,NA,NA,NA,NA
+life,NH_Life,2025,43.1,92.6,83.6,NA,NA,NA,NA
+life,Tongyang,2021,29.4,84.2,61.7,NA,NA,NA,NA
+life,Tongyang,2022,27.9,83.7,64.8,NA,NA,NA,NA
+life,Tongyang,2023,32.0,87.8,59.2,NA,NA,NA,NA
+life,Tongyang,2024,62.4,88.8,78.3,NA,NA,NA,NA
+life,Tongyang,2025,57.0,89.9,78.6,NA,NA,NA,NA
+life,Lina_Life,2021,38.4,85.5,77.0,NA,NA,NA,NA
+life,Lina_Life,2022,31.1,85.6,77.7,NA,NA,NA,NA
+life,Lina_Life,2023,3.2,83.9,74.3,NA,NA,NA,NA
+life,Lina_Life,2024,17.0,82.3,70.8,NA,NA,NA,NA
+life,Lina_Life,2025,23.7,81.8,70.4,NA,NA,NA,NA
+life,MetLife,2021,25.1,80.5,62.7,NA,NA,NA,NA
+life,MetLife,2022,24.5,84.8,65.7,NA,NA,NA,NA
+life,MetLife,2023,21.8,85.9,68.8,NA,NA,NA,NA
+life,MetLife,2024,32.2,88.1,68.6,NA,NA,NA,NA
+life,MetLife,2025,48.5,88.4,76.0,NA,NA,NA,NA
+life,MiraeAsset,2021,52.3,79.8,61.2,NA,NA,NA,NA
+life,MiraeAsset,2022,NA,83.5,66.1,NA,NA,NA,NA
+life,MiraeAsset,2023,NA,82.4,68.1,NA,NA,NA,NA
+life,MiraeAsset,2024,NA,80.8,63.1,NA,NA,NA,NA
+life,MiraeAsset,2025,NA,79.5,65.7,NA,NA,NA,NA
+life,Samsung_Life,2021,49.8,88.3,68.8,NA,NA,NA,NA
+life,Samsung_Life,2022,47.2,90.2,75.2,NA,NA,NA,NA
+life,Samsung_Life,2023,43.1,85.4,65.5,NA,NA,NA,NA
+life,Samsung_Life,2024,48.4,89.7,68.9,NA,NA,NA,NA
+life,Samsung_Life,2025,49.2,88.0,77.2,NA,NA,NA,NA
+life,Shinhan_Life,2021,30.9,81.4,62.5,NA,NA,NA,NA
+life,Shinhan_Life,2022,34.7,82.0,64.6,NA,NA,NA,NA
+life,Shinhan_Life,2023,31.7,84.1,63.0,NA,NA,NA,NA
+life,Shinhan_Life,2024,44.8,87.0,69.4,NA,NA,NA,NA
+life,Shinhan_Life,2025,36.9,88.1,75.6,NA,NA,NA,NA
+life,Chubb_Life,2021,31.9,64.9,34.5,NA,NA,NA,NA
+life,Chubb_Life,2022,18.1,68.9,45.2,NA,NA,NA,NA
+life,Chubb_Life,2023,NA,81.9,62.0,NA,NA,NA,NA
+life,Chubb_Life,2024,NA,89.4,68.8,NA,NA,NA,NA
+life,Chubb_Life,2025,NA,91.7,80.1,NA,NA,NA,NA
+life,Prudential,2021,46.3,84.0,72.4,NA,NA,NA,NA
+life,Fubon_Hyundai,2021,32.8,81.5,68.7,NA,NA,NA,NA
+life,Fubon_Hyundai,2022,21.0,85.8,68.5,NA,NA,NA,NA
+life,Fubon_Hyundai,2023,28.6,78.1,64.6,NA,NA,NA,NA
+life,Fubon_Hyundai,2024,28.2,87.6,60.3,NA,NA,NA,NA
+life,Fubon_Hyundai,2025,27.0,87.4,77.7,NA,NA,NA,NA
+life,Hana_Life,2021,11.8,91.2,72.8,NA,NA,NA,NA
+life,Hana_Life,2022,5.0,79.4,75.1,NA,NA,NA,NA
+life,Hana_Life,2023,48.3,82.4,62.7,NA,NA,NA,NA
+life,Hana_Life,2024,10.8,90.3,65.0,NA,NA,NA,NA
+life,Hana_Life,2025,NA,88.6,80.4,NA,NA,NA,NA
+life,Hanwha_Life,2021,45.5,84.8,64.6,NA,NA,NA,NA
+life,Hanwha_Life,2022,NA,84.2,68.6,NA,NA,NA,NA
+life,Hanwha_Life,2023,NA,87.6,59.2,NA,NA,NA,NA
+life,Hanwha_Life,2024,NA,88.0,72.8,NA,NA,NA,NA
+life,Hanwha_Life,2025,NA,89.7,75.1,NA,NA,NA,NA
+life,Heungkuk_Life,2021,38.5,85.8,69.8,NA,NA,NA,NA
+life,Heungkuk_Life,2022,21.8,84.3,71.8,NA,NA,NA,NA
+life,Heungkuk_Life,2023,22.4,76.2,45.5,NA,NA,NA,NA
+life,Heungkuk_Life,2024,12.3,85.2,60.8,NA,NA,NA,NA
+life,Heungkuk_Life,2025,29.6,84.9,72.8,NA,NA,NA,NA
+nonlife,AIG,2020,NA,NA,NA,0.17,2.235,0.0711,80046
+nonlife,AIG,2021,45.6,70.1,57.5,0.15,3.3529,0.0802,79632
+nonlife,AIG,2022,25.2,73.4,56.9,0.125,2.9905,0.0429,79853
+nonlife,AIG,2023,28.9,69.7,57.5,0.11,1.8177,0.0477,77239
+nonlife,AIG,2024,12.4,62.9,53.9,0.1,2.0254,0.0,56284
+nonlife,AIG,2025,43.8,60.8,46.0,0.08,1.6357,0.0422,45729
+nonlife,AXA,2020,NA,NA,NA,0.015,1.576,0.3082,23477
+nonlife,AXA,2021,0.0,76.5,66.2,0.025,1.7377,0.1925,29579
+nonlife,AXA,2022,27.1,69.6,66.6,0.015,1.7038,0.1538,33043
+nonlife,AXA,2023,10.7,75.6,57.5,0.02,1.6049,0.1911,36576
+nonlife,AXA,2024,7.7,72.1,60.7,0.02,1.6474,0.1499,40305
+nonlife,AXA,2025,15.4,70.9,56.4,0.015,1.7001,0.1192,43292
+nonlife,DB_Ins,2020,NA,NA,NA,0.035,1.4852,0.1725,1055955
+nonlife,DB_Ins,2021,70.4,88.7,74.2,0.03,1.5558,0.1539,1357218
+nonlife,DB_Ins,2022,64.4,90.1,76.2,0.02,1.5657,0.1509,1622444
+nonlife,DB_Ins,2023,62.7,88.9,75.8,0.02,1.6118,0.1862,1885259
+nonlife,DB_Ins,2024,65.4,88.5,74.1,0.01,1.4185,0.2327,1847456
+nonlife,DB_Ins,2025,64.4,88.8,73.6,0.01,1.3444,0.2017,2094304
+nonlife,KB_Ins,2020,NA,NA,NA,0.025,1.0496,0.172,789159
+nonlife,KB_Ins,2021,57.2,86.5,68.7,0.02,1.6338,0.1925,952056
+nonlife,KB_Ins,2022,60.8,89.4,71.8,0.01,1.6188,0.1461,1087954
+nonlife,KB_Ins,2023,55.6,87.6,74.6,0.01,1.4957,0.1392,1314126
+nonlife,KB_Ins,2024,54.9,88.1,70.2,0.01,1.4932,0.2225,1245205
+nonlife,KB_Ins,2025,66.7,88.5,71.9,0.01,1.3779,0.1907,1596248
+nonlife,NH_Ins,2020,NA,NA,NA,0.03,0.7966,0.3176,113477
+nonlife,NH_Ins,2021,50.0,91.3,75.0,0.01,0.5892,0.3598,120503
+nonlife,NH_Ins,2022,42.5,85.9,85.5,0.01,0.4789,0.401,123187
+nonlife,NH_Ins,2023,42.3,81.0,74.7,0.01,1.0797,0.5802,135316
+nonlife,NH_Ins,2024,50.7,82.8,71.6,0.01,1.669,0.7853,117199
+nonlife,NH_Ins,2025,46.0,85.6,71.6,0.01,1.6054,1.1456,116608
+nonlife,Lotte,2020,NA,NA,NA,0.055,1.3346,0.1678,157795
+nonlife,Lotte,2021,60.6,89.3,79.1,0.07,1.6115,0.1352,195531
+nonlife,Lotte,2022,53.7,89.4,83.3,0.035,1.6089,0.1325,238485
+nonlife,Lotte,2023,48.8,88.4,76.6,0.02,1.4318,0.1124,292157
+nonlife,Lotte,2024,36.7,85.7,70.1,0.02,1.5575,0.1217,302278
+nonlife,Lotte,2025,23.5,80.0,64.9,0.02,1.362,0.1002,283553
+nonlife,Meritz,2020,NA,NA,NA,0.035,1.5328,0.1477,1419599
+nonlife,Meritz,2021,45.3,83.6,69.4,0.025,1.6207,0.121,1455630
+nonlife,Meritz,2022,45.8,84.6,69.2,0.01,1.5829,0.0709,1263618
+nonlife,Meritz,2023,45.1,84.7,66.5,0.01,1.5202,0.1204,1238376
+nonlife,Meritz,2024,48.0,84.4,64.6,NA,1.5491,0.1834,1045025
+nonlife,Meritz,2025,40.4,84.4,64.5,0.01,1.3968,0.2039,1151132
+nonlife,Samsung_FM,2020,NA,NA,NA,0.025,1.5822,0.1516,1182241
+nonlife,Samsung_FM,2021,66.3,86.8,61.1,0.02,1.6603,0.1503,1474270
+nonlife,Samsung_FM,2022,44.3,87.6,69.7,0.02,1.578,0.1618,1550960
+nonlife,Samsung_FM,2023,47.8,86.3,68.5,0.02,1.4606,0.1818,1810869
+nonlife,Samsung_FM,2024,65.9,88.2,67.2,0.01,1.3958,0.2276,1835860
+nonlife,Samsung_FM,2025,75.1,89.5,72.4,0.01,1.3286,0.1585,2440415
+nonlife,ShinhanEZ,2020,NA,NA,NA,0.09,1.2821,0.4808,468
+nonlife,ShinhanEZ,2021,NA,NA,NA,NA,2.1944,0.3497,319
+nonlife,ShinhanEZ,2022,0.0,0.0,64.2,NA,1.3423,0.0,149
+nonlife,ShinhanEZ,2023,NA,NA,NA,0.06,0.0,0.0,33
+nonlife,ShinhanEZ,2024,NA,68.1,NA,0.05,1.4925,1.676,268
+nonlife,ShinhanEZ,2025,NA,79.7,49.7,0.0,2.9324,1.2441,3683
+nonlife,ACE_Lina,2020,NA,NA,NA,0.325,1.6989,0.1398,125902
+nonlife,ACE_Lina,2021,NA,64.4,55.3,0.245,1.1272,0.1255,120027
+nonlife,ACE_Lina,2022,0.0,63.3,50.2,0.235,1.1101,0.1221,92060
+nonlife,ACE_Lina,2023,NA,65.4,47.3,0.08,1.5766,0.1962,61396
+nonlife,ACE_Lina,2024,NA,68.0,47.3,0.055,2.2059,0.2154,53312
+nonlife,ACE_Lina,2025,NA,64.6,50.1,0.07,2.0021,0.2371,61986
+nonlife,Yebyeol_MG,2020,NA,NA,NA,0.02,1.3191,0.3395,51399
+nonlife,Yebyeol_MG,2021,70.0,87.2,73.3,0.025,1.2286,0.2002,58198
+nonlife,Yebyeol_MG,2022,57.7,86.7,76.0,0.01,0.9074,0.3001,62269
+nonlife,Yebyeol_MG,2023,75.0,84.3,71.5,0.01,0.7286,0.1467,74806
+nonlife,Yebyeol_MG,2024,71.4,86.5,70.2,0.0,0.8476,0.1209,80459
+nonlife,Yebyeol_MG,2025,20.0,79.4,62.5,0.005,0.5979,0.1126,90490
+nonlife,Cardif_GI,2021,NA,73.8,57.4,NA,NA,NA,NA
+nonlife,KakaoPay,2024,NA,NA,NA,0.0,2.7053,0.0396,3105
+nonlife,KakaoPay,2025,NA,NA,NA,0.005,1.7519,0.0851,37045
+nonlife,Hana_Ins,2020,NA,NA,NA,0.03,1.703,0.5576,5226
+nonlife,Hana_Ins,2021,47.0,88.0,78.2,0.02,2.8995,1.0068,5863
+nonlife,Hana_Ins,2022,28.1,87.2,79.4,0.025,2.5589,1.6575,16843
+nonlife,Hana_Ins,2023,37.8,87.6,75.2,0.01,2.155,1.192,34107
+nonlife,Hana_Ins,2024,47.2,83.3,76.7,0.025,1.8735,1.142,51455
+nonlife,Hana_Ins,2025,26.6,79.6,69.7,0.015,1.8797,1.0805,58200
+nonlife,Hanwha_GI,2020,NA,NA,NA,0.06,1.5143,0.1538,485032
+nonlife,Hanwha_GI,2021,55.7,81.1,66.4,0.035,1.5331,0.1796,397548
+nonlife,Hanwha_GI,2022,63.6,84.3,63.6,0.03,1.3308,0.1758,362330
+nonlife,Hanwha_GI,2023,66.2,84.9,66.4,0.025,0.7669,0.1022,482615
+nonlife,Hanwha_GI,2024,74.9,86.4,67.5,0.03,0.9475,0.1135,564964
+nonlife,Hanwha_GI,2025,74.1,85.1,71.1,0.02,0.9737,0.1386,765849
+nonlife,Hyundai_MF,2020,NA,NA,NA,0.035,1.9594,0.1577,1386058
+nonlife,Hyundai_MF,2021,66.6,87.4,73.0,0.03,1.7859,0.1675,1794348
+nonlife,Hyundai_MF,2022,57.6,88.8,74.9,0.02,1.5044,0.1702,2136072
+nonlife,Hyundai_MF,2023,58.0,87.0,75.6,0.02,1.4245,0.2023,2567540
+nonlife,Hyundai_MF,2024,57.0,87.1,73.3,0.015,1.5926,0.1774,2300898
+nonlife,Hyundai_MF,2025,54.1,86.8,73.4,0.01,1.3303,0.174,2412342
+nonlife,Heungkuk_FM,2020,NA,NA,NA,0.065,1.3844,0.1573,106615
+nonlife,Heungkuk_FM,2021,63.3,86.0,70.7,0.04,1.5666,0.1498,141454
+nonlife,Heungkuk_FM,2022,55.7,88.6,74.5,0.025,1.6317,0.1228,199429
+nonlife,Heungkuk_FM,2023,60.6,88.0,76.6,0.02,1.2976,0.1314,297478
+nonlife,Heungkuk_FM,2024,75.0,86.6,73.5,0.01,1.2178,0.1098,376759
+nonlife,Heungkuk_FM,2025,68.2,86.0,71.1,0.015,1.1147,0.1368,466306
+", stringsAsFactors = FALSE)
+str(raw)
+table(raw$sector, raw$year)
+```
+
+# Cleaning and variable construction
+
+* A published value of exactly 0.0 for settlement or persistency means the company had no newly registered
+  exclusive planners, or no reportable cohort, in the window. These are set to `NA`.
+* Lapse $= 100 -$ persistency. Mis-selling is rescaled to basis points.
+* **Timing.** Persistency published for year $t$ refers to contracts written in $t-1$ (13th month) or $t-2$
+  (25th month). We therefore use $\text{MS}_{t-1}$ for 13th-month lapse, and $\text{MS}_{t-2}$ and
+  $\text{Settle}_{t-1}$ for 25th-month lapse.
+* Lags are true one-year lags: the panel is completed to a full company x year grid before lagging.
+
+```{r clean}
+d <- raw
+for (v in c("settle", "p13", "p25")) d[[v]][!is.na(d[[v]]) & d[[v]] == 0] <- NA
+d$lapse13 <- 100 - d$p13
+d$lapse25 <- 100 - d$p25
+d$ms_bp   <- 100 * d$ms
+
+# complete company x year grid, then lag within company
+pan <- do.call(rbind, lapply(split(d, d$company), function(g) {
+  yrs <- seq(min(g$year), max(g$year))
+  out <- merge(data.frame(company = g$company[1], sector = g$sector[1], year = yrs),
+               g[, setdiff(names(g), c("company", "sector"))], by = "year", all.x = TRUE)
+  out <- out[order(out$year), ]
+  lag1 <- function(x) c(NA, head(x, -1))
+  out$ms_bp_l1  <- lag1(out$ms_bp)
+  out$ms_bp_l2  <- lag1(out$ms_bp_l1)
+  out$settle_l1 <- lag1(out$settle)
+  out
+}))
+rownames(pan) <- NULL
+
+NONFACE <- c("AIG", "ACE_Lina", "AXA")             # telemarketing / direct-led insurers
+EXCL    <- c("ShinhanEZ", "KakaoPay", "Cardif_GI") # digital or too sparsely reported
+
+nl <- subset(pan, sector == "nonlife" & year >= 2021 & year <= 2025 & !company %in% EXCL)
+lf <- subset(pan, sector == "life"    & year >= 2021 & year <= 2025)
+nl$nonface <- nl$company %in% NONFACE
+c(nonlife_firms = length(unique(nl$company)), nonlife_obs = nrow(nl),
+  life_firms = length(unique(lf$company)), life_obs = nrow(lf))
+```
+
+# Descriptive statistics
+
+The between SD is the SD of firm means; the within SD is the SD of deviations from firm means.
+
+```{r describe}
+describe <- function(df, vars) {
+  do.call(rbind, lapply(vars, function(v) {
+    x <- df[!is.na(df[[v]]), c("company", v)]
+    m <- ave(x[[v]], x$company)
+    data.frame(var = v, N = nrow(x), firms = length(unique(x$company)),
+               mean = mean(x[[v]]), sd = sd(x[[v]]),
+               sd_between = sd(tapply(x[[v]], x$company, mean)),
+               sd_within = sd(x[[v]] - m))
+  }))
+}
+knitr_ok <- requireNamespace("knitr", quietly = TRUE)
+show <- function(x, digits = 3) if (knitr_ok) knitr::kable(x, digits = digits) else print(x, digits = digits)
+show(describe(nl, c("lapse13", "lapse25", "settle", "ms_bp", "deny_rate", "post_claim_cxl_rate")), 2)
+show(describe(lf, c("lapse13", "lapse25", "settle")), 2)
+```
+
+```{r ms-trend, fig.cap="Mis-selling rate by non-life insurer. TM/direct-led insurers in orange."}
+ms_all <- subset(pan, sector == "nonlife" & !company %in% EXCL)
+plot(NA, xlim = c(2020, 2025), ylim = c(0, max(ms_all$ms_bp, na.rm = TRUE)),
+     xlab = "Year", ylab = "Mis-selling rate (bp)", las = 1)
+grid(col = "#e1e0d9")
+for (co in unique(ms_all$company)) {
+  g <- ms_all[ms_all$company == co, ]
+  lines(g$year, g$ms_bp, col = if (co %in% NONFACE) pal["orange"] else pal["blue"], lwd = 1.4)
+}
+legend("topright", c("TM/direct-led", "Face-to-face-led"), col = pal[c("orange", "blue")], lwd = 2, bty = "n")
+```
+
+# Correlation decomposition
+
+* **Pooled** correlation: all firm-years together.
+* **Between** correlation: computed on firm means.
+* **Within** correlation: computed after removing firm and year means (two-way demeaning).
+
+```{r corr}
+twoway_demean <- function(x, id, t) x - ave(x, id) - ave(x, t) + mean(x)
+corr_decomp <- function(df, x, y) {
+  z <- df[complete.cases(df[, c(x, y)]), c("company", "year", x, y)]
+  bm <- aggregate(z[, c(x, y)], list(company = z$company), mean)
+  wx <- twoway_demean(z[[x]], z$company, z$year); wy <- twoway_demean(z[[y]], z$company, z$year)
+  data.frame(x = x, y = y, N = nrow(z), firms = nrow(bm),
+             r_pooled = cor(z[[x]], z[[y]]), p_pooled = cor.test(z[[x]], z[[y]])$p.value,
+             r_between = cor(bm[[x]], bm[[y]]), p_between = cor.test(bm[[x]], bm[[y]])$p.value,
+             r_within = cor(wx, wy), p_within = cor.test(wx, wy)$p.value)
+}
+cd <- rbind(
+  cbind(sample = "nonlife", corr_decomp(nl, "ms_bp_l1", "lapse13")),
+  cbind(sample = "nonlife", corr_decomp(nl, "ms_bp_l2", "lapse25")),
+  cbind(sample = "nonlife", corr_decomp(nl, "settle", "lapse13")),
+  cbind(sample = "nonlife", corr_decomp(nl, "settle_l1", "lapse25")),
+  cbind(sample = "nonlife", corr_decomp(nl, "settle", "ms_bp")),
+  cbind(sample = "nonlife", corr_decomp(nl, "deny_rate", "lapse13")),
+  cbind(sample = "life",    corr_decomp(lf, "settle", "lapse13")),
+  cbind(sample = "life",    corr_decomp(lf, "settle_l1", "lapse25")))
+show(cd, 3)
+```
+
+The within-correlation p-values ignore the degrees of freedom absorbed by demeaning, so treat them as indicative only.
+
+# Panel regressions
+
+The specifications are:
+
+* **A** (non-life): $\text{Lapse13}_{it} = \alpha_i + \lambda_t + \beta\,\text{MS}_{i,t-1} + \gamma\,\text{Settle}_{it} + \varepsilon_{it}$
+* **B** (non-life): $\text{Lapse25}_{it} = \alpha_i + \lambda_t + \beta\,\text{MS}_{i,t-2} + \gamma\,\text{Settle}_{i,t-1} + \varepsilon_{it}$
+* **C** (non-life): $\text{MS}_{it} = \alpha_i + \lambda_t + \gamma\,\text{Settle}_{it} + \varepsilon_{it}$
+* **L1** (life): $\text{Lapse13}_{it} = \alpha_i + \lambda_t + \gamma\,\text{Settle}_{it} + \varepsilon_{it}$
+
+Each specification is estimated as pooled OLS, random effects, firm FE and two-way FE.
+Standard errors are firm-clustered (Arellano HC1).
+
+```{r models}
+pnl <- pdata.frame(nl, index = c("company", "year"))
+plf <- pdata.frame(lf, index = c("company", "year"))
+
+fit_all <- function(f, pd) list(
+  pooled = plm(f, pd, model = "pooling"),
+  random = plm(f, pd, model = "random"),
+  fe     = plm(f, pd, model = "within", effect = "individual"),
+  twfe   = plm(f, pd, model = "within", effect = "twoways"))
+cl <- function(m) coeftest(m, vcov = vcovHC(m, method = "arellano", type = "HC1", cluster = "group"))
+
+fA <- lapse13 ~ ms_bp_l1 + settle
+fB <- lapse25 ~ ms_bp_l2 + settle_l1
+fC <- ms_bp ~ settle
+fL <- lapse13 ~ settle
+mA <- fit_all(fA, pnl); mB <- fit_all(fB, pnl); mC <- fit_all(fC, pnl); mL <- fit_all(fL, plf)
+
+tab <- function(ms, vars) {
+  do.call(rbind, lapply(names(ms), function(k) {
+    ct <- cl(ms[[k]])
+    do.call(rbind, lapply(vars, function(v) if (v %in% rownames(ct))
+      data.frame(model = k, term = v, estimate = ct[v, 1], cluster_se = ct[v, 2], p = ct[v, 4],
+                 N = nobs(ms[[k]]))))
+  }))
+}
+show(tab(mA, c("ms_bp_l1", "settle")), 3)
+show(tab(mB, c("ms_bp_l2", "settle_l1")), 3)
+show(tab(mC, "settle"), 3)
+show(tab(mL, "settle"), 3)
+```
+
+## Hausman tests (FE vs. RE)
+
+```{r hausman}
+rbind(A  = unlist(phtest(mA$fe, mA$random)[c("statistic", "p.value")]),
+      B  = unlist(phtest(mB$fe, mB$random)[c("statistic", "p.value")]),
+      C  = unlist(phtest(mC$fe, mC$random)[c("statistic", "p.value")]),
+      L1 = unlist(phtest(mL$fe, mL$random)[c("statistic", "p.value")]))
+```
+
+A rejection means the firm effects are correlated with the regressors, so RE and pooled estimates are biased and FE is preferred.
+
+## Wild cluster bootstrap (few clusters)
+
+The non-life sample has only about 13 firm clusters. Cluster-robust t-tests over-reject in that setting, so the
+key two-way FE coefficients are re-tested with a wild cluster *restricted* bootstrap. It uses Webb six-point
+weights, imposes the null, and is estimated as least-squares dummy variables (LSDV).
+
+```{r wcr}
+wcr_boot <- function(df, y, xs, test, B = 9999) {
+  z <- df[complete.cases(df[, c(y, xs)]), ]
+  X <- model.matrix(reformulate(c(xs, "factor(company)", "factor(year)")), z)
+  Y <- z[[y]]; g <- as.integer(factor(z$company)); G <- max(g)
+  k <- which(colnames(X) == test)
+  tstat <- function(Yv) {
+    XtXi <- MASS_ginv(crossprod(X)); b <- XtXi %*% crossprod(X, Yv); u <- as.vector(Yv - X %*% b)
+    meat <- Reduce(`+`, lapply(seq_len(G), function(j) { s <- crossprod(X[g == j, , drop = FALSE], u[g == j]); s %*% t(s) }))
+    n <- nrow(X); p <- qr(X)$rank
+    V <- (G / (G - 1)) * ((n - 1) / (n - p)) * XtXi %*% meat %*% XtXi
+    c(t = b[k] / sqrt(V[k, k]), b = b[k])
+  }
+  t0 <- tstat(Y)
+  Xr <- X[, -k, drop = FALSE]; br <- qr.coef(qr(Xr), Y); br[is.na(br)] <- 0
+  fitted_r <- as.vector(Xr %*% br); ur <- Y - fitted_r
+  webb <- c(-sqrt(1.5), -1, -sqrt(0.5), sqrt(0.5), 1, sqrt(1.5))
+  tb <- replicate(B, tstat(fitted_r + sample(webb, G, replace = TRUE)[g] * ur)["t"])
+  c(estimate = unname(t0["b"]), t = unname(t0["t"]), p_boot = mean(abs(tb) >= abs(t0["t"])), clusters = G)
+}
+MASS_ginv <- function(A) { s <- svd(A); tol <- max(dim(A)) * max(s$d) * .Machine$double.eps
+  s$v %*% (ifelse(s$d > tol, 1 / s$d, 0) * t(s$u)) }
+
+B_DRAWS <- 1999   # raise to 9999 for publication-quality p-values
+rbind(
+  A_ms_bp_l1   = wcr_boot(nl, "lapse13", c("ms_bp_l1", "settle"), "ms_bp_l1", B_DRAWS),
+  A_settle     = wcr_boot(nl, "lapse13", c("ms_bp_l1", "settle"), "settle", B_DRAWS),
+  B_settle_l1  = wcr_boot(nl, "lapse25", c("ms_bp_l2", "settle_l1"), "settle_l1", B_DRAWS),
+  C_settle     = wcr_boot(nl, "ms_bp", "settle", "settle", B_DRAWS),
+  L1_settle    = wcr_boot(lf, "lapse13", "settle", "settle", B_DRAWS))
+```
+
+# Residual analysis
+
+Residual diagnostics are run on the **LSDV** equivalent of each two-way FE model: `lm` with firm and year dummies.
+It gives identical slope coefficients to `plm`'s within estimator and gives access to fitted values, leverage,
+studentised residuals and Cook's distance. The first check confirms the two estimators agree.
+
+```{r lsdv}
+lsdv <- function(f, df) {
+  z <- df[complete.cases(df[, all.vars(f)]), ]
+  z <- z[ave(z$year, z$company, FUN = length) >= 2, ]   # singleton firms have leverage 1 and carry no FE information
+  m <- lm(update(f, . ~ . + factor(company) + factor(year)), data = z)
+  m$panel <- z; m
+}
+lA <- lsdv(fA, nl); lB <- lsdv(fB, nl); lC <- lsdv(fC, nl); lL <- lsdv(fL, lf)
+rbind(plm_twfe = coef(mA$twfe), lm_lsdv = coef(lA)[names(coef(mA$twfe))])
+rbind(plm_twfe_L1 = coef(mL$twfe), lm_lsdv_L1 = coef(lL)["settle"])   # identical after dropping singletons
+```
+
+## Why fixed effects? Pooled residuals cluster by firm
+
+If the pooled model were adequate, each firm's residuals would centre on zero. Instead they shift by firm,
+which shows unobserved firm heterogeneity. The firm FE models absorb it.
+
+```{r pooled-vs-fe, fig.height=5}
+zA <- lA$panel
+pooledA <- lm(fA, data = zA)
+par(mfrow = c(1, 2), mar = c(7, 4, 2, 1))
+boxplot(resid(pooledA) ~ zA$company, las = 2, xlab = "", ylab = "Residual (pp)", main = "Pooled OLS",
+        col = ifelse(sort(unique(zA$company)) %in% NONFACE, pal["orange"], pal["blue"]), cex.axis = 0.7)
+abline(h = 0, lty = 2)
+boxplot(resid(lA) ~ zA$company, las = 2, xlab = "", ylab = "Residual (pp)", main = "Two-way FE",
+        col = ifelse(sort(unique(zA$company)) %in% NONFACE, pal["orange"], pal["blue"]), cex.axis = 0.7)
+abline(h = 0, lty = 2)
+par(op)
+# share of residual variance explained by firm identity
+c(pooled = summary(lm(resid(pooledA) ~ zA$company))$r.squared,
+  twfe   = summary(lm(resid(lA) ~ zA$company))$r.squared)
+```
+
+## Standard diagnostic plots (spec A, 13th-month lapse)
+
+```{r diag-plots, fig.height=7}
+diag_panel <- function(m, title) {
+  z <- m$panel; r <- resid(m); f <- fitted(m); rs <- rstudent(m)
+  col <- ifelse(z$company %in% NONFACE, pal["orange"], pal["blue"])
+  par(mfrow = c(2, 2), mar = c(4, 4, 2.5, 1), oma = c(0, 0, 1.5, 0))
+  plot(f, r, pch = 19, col = col, xlab = "Fitted", ylab = "Residual", main = "Residuals vs fitted")
+  abline(h = 0, lty = 2); lines(lowess(f, r), col = pal["grey"], lwd = 2)
+  qqnorm(rs, pch = 19, col = col, main = "Normal Q-Q (studentised)"); qqline(rs, lty = 2)
+  plot(f, sqrt(abs(rs)), pch = 19, col = col, xlab = "Fitted", ylab = expression(sqrt("|studentised residual|")),
+       main = "Scale-location"); lines(lowess(f, sqrt(abs(rs))), col = pal["grey"], lwd = 2)
+  h <- hatvalues(m); cdist <- cooks.distance(m)
+  plot(h, rs, pch = 19, col = col, cex = 0.6 + 6 * cdist / max(cdist), xlab = "Leverage", ylab = "Studentised residual",
+       main = "Influence (size = Cook's D)")
+  abline(h = c(-2, 2), lty = 3)
+  top <- order(cdist, decreasing = TRUE)[1:3]
+  text(h[top], rs[top], paste(z$company[top], z$year[top]), pos = 4, cex = 0.7)
+  mtext(title, outer = TRUE, font = 2)
+  par(op)
+}
+diag_panel(lA, "Spec A: Lapse13 ~ MS(t-1) + Settle, two-way FE")
+```
+
+## Residuals by year and against regressors
+
+```{r resid-structure, fig.height=6}
+z <- lA$panel; r <- resid(lA)
+par(mfrow = c(2, 2), mar = c(4, 4, 2.5, 1))
+boxplot(r ~ z$year, xlab = "Year", ylab = "Residual", main = "By year", col = pal["aqua"]); abline(h = 0, lty = 2)
+plot(z$settle, r, pch = 19, col = pal["blue"], xlab = "Settlement (%)", ylab = "Residual", main = "vs settlement")
+abline(h = 0, lty = 2); lines(lowess(z$settle, r), col = pal["grey"], lwd = 2)
+plot(z$ms_bp_l1, r, pch = 19, col = ifelse(z$company %in% NONFACE, pal["orange"], pal["blue"]),
+     xlab = "Mis-selling t-1 (bp)", ylab = "Residual", main = "vs mis-selling t-1")
+abline(h = 0, lty = 2)
+# residual autocorrelation within firm: e_it vs e_i,t-1
+z$r <- r; z <- z[order(z$company, z$year), ]
+z$r_l1 <- ave(z$r, z$company, FUN = function(x) c(NA, head(x, -1)))
+z$r_l1[c(FALSE, diff(z$year) != 1 | head(z$company, -1) != tail(z$company, -1))] <- NA
+plot(z$r_l1, z$r, pch = 19, col = pal["blue"], xlab = "Residual t-1", ylab = "Residual t", main = "Serial dependence")
+abline(h = 0, v = 0, lty = 2); abline(lm(r ~ r_l1, z), col = pal["grey"], lwd = 2)
+par(op)
+```
+
+Within-firm demeaning induces a mechanical negative correlation between residuals in a short panel: about
+$-1/(T-1) = -0.25$ for $T=5$. A lag coefficient near $-0.25$ is therefore the benchmark for "no serial
+correlation", not zero. The Wooldridge test below uses that benchmark.
+
+## Formal tests
+
+```{r tests}
+normality <- function(m) {
+  r <- resid(m); n <- length(r); s <- (r - mean(r)) / sd(r)
+  jb <- n / 6 * (mean(s^3)^2 + (mean(s^4) - 3)^2 / 4)
+  c(shapiro_W = unname(shapiro.test(r)$statistic), shapiro_p = shapiro.test(r)$p.value,
+    skew = mean(s^3), excess_kurt = mean(s^4) - 3, jarque_bera = jb, jb_p = 1 - pchisq(jb, 2))
+}
+hetero <- function(m, regs) {
+  z <- m$panel
+  bp_full <- bptest(m)                                         # all regressors incl. dummies
+  bp_x    <- bptest(m, reformulate(regs), data = z)            # slopes only
+  c(BP_all = unname(bp_full$statistic), BP_all_p = bp_full$p.value,
+    BP_slopes = unname(bp_x$statistic), BP_slopes_p = bp_x$p.value)
+}
+spec_tests <- function(m) {
+  rs <- resettest(m, power = 2:3, type = "fitted")
+  c(RESET = unname(rs$statistic), RESET_p = rs$p.value)
+}
+panel_tests <- function(f, pd) {
+  w  <- tryCatch(pwartest(f, data = pd), error = function(e) NULL)       # Wooldridge FE serial corr.
+  cdt <- tryCatch(pcdtest(plm(f, pd, model = "within", effect = "twoways"), test = "cd"), error = function(e) NULL)
+  c(Wooldridge_AR_F = if (!is.null(w)) unname(w$statistic) else NA,
+    Wooldridge_AR_p = if (!is.null(w)) w$p.value else NA,
+    Pesaran_CD = if (!is.null(cdt)) unname(cdt$statistic) else NA,
+    Pesaran_CD_p = if (!is.null(cdt)) cdt$p.value else NA)
+}
+diag_tab <- rbind(
+  A  = c(normality(lA), hetero(lA, c("ms_bp_l1", "settle")),   spec_tests(lA), panel_tests(fA, pnl)),
+  B  = c(normality(lB), hetero(lB, c("ms_bp_l2", "settle_l1")), spec_tests(lB), panel_tests(fB, pnl)),
+  C  = c(normality(lC), hetero(lC, "settle"),                   spec_tests(lC), panel_tests(fC, pnl)),
+  L1 = c(normality(lL), hetero(lL, "settle"),                   spec_tests(lL), panel_tests(fL, plf)))
+show(t(diag_tab), 3)
+```
+
+The tests are:
+
+* **Shapiro--Wilk / Jarque--Bera**: normality of residuals. Inference does not rely on normality (clustered
+  SE, bootstrap), but heavy tails flag outliers.
+* **Breusch--Pagan**: heteroskedasticity, against all regressors and against the slope regressors only.
+  Clustered SEs are robust to it either way.
+* **RESET** (fitted$^2$, fitted$^3$): functional-form misspecification.
+* **Wooldridge test**: serial correlation in FE residuals, accounting for the $-1/(T-1)$ demeaning bias.
+* **Pesaran CD**: cross-sectional dependence, i.e. common shocks not absorbed. Year effects should remove most of it.
+
+## Influence: leave-one-firm-out
+
+With 13 clusters, a single insurer can drive a result. Below, each firm is dropped in turn and the TWFE model is re-estimated.
+
+```{r jackknife, fig.height=4.5}
+firms <- sort(unique(lA$panel$company))
+jk <- t(sapply(firms, function(co) {
+  m <- plm(fA, pdata.frame(subset(nl, company != co), index = c("company", "year")), model = "within", effect = "twoways")
+  coef(m)[c("ms_bp_l1", "settle")]
+}))
+full <- coef(mA$twfe)[c("ms_bp_l1", "settle")]
+show(cbind(jk, d_settle = jk[, "settle"] - full["settle"]), 3)
+par(mfrow = c(1, 2), mar = c(7, 4, 2.5, 1))
+for (v in c("settle", "ms_bp_l1")) {
+  barplot(jk[, v], las = 2, cex.names = 0.7, col = ifelse(firms %in% NONFACE, pal["orange"], pal["blue"]),
+          main = paste("Drop one firm:", v), ylab = "TWFE coefficient")
+  abline(h = full[v], lty = 2, lwd = 2)
+}
+par(op)
+range(jk[, "settle"])
+```
+
+## Influence: Cook's distance and outlier-trimmed refit
+
+```{r cooks}
+z <- lA$panel; cdist <- cooks.distance(lA); rs <- rstudent(lA)
+flag <- cdist > 4 / nrow(z) | abs(rs) > 2.5
+show(data.frame(company = z$company, year = z$year, lapse13 = z$lapse13, settle = z$settle,
+                ms_bp_l1 = z$ms_bp_l1, rstudent = rs, cooks = cdist)[flag, ], 3)
+trim <- z[!flag, ]
+m_trim <- plm(fA, pdata.frame(trim, index = c("company", "year")), model = "within", effect = "twoways")
+rbind(full = cl(mA$twfe)["settle", ], trimmed = cl(m_trim)["settle", ])
+```
+
+## Residuals of the life model (L1)
+
+```{r life-diag, fig.height=7}
+diag_panel(lL, "Spec L1 (life): Lapse13 ~ Settle, two-way FE")
+```
+
+# Summary
+
+```{r summary}
+ctA <- cl(mA$twfe); ctL <- cl(mL$twfe)
+cat(sprintf(paste0(
+  "Spec A (non-life, TWFE): settlement coef = %.3f (cluster SE %.3f, p = %.3f); ",
+  "mis-selling(t-1) coef = %.3f (p = %.3f).\n",
+  "Leave-one-firm-out range for settlement: [%.3f, %.3f].\n",
+  "Spec L1 (life, TWFE): settlement coef = %.3f (p = %.3f).\n"),
+  ctA["settle", 1], ctA["settle", 2], ctA["settle", 4], ctA["ms_bp_l1", 1], ctA["ms_bp_l1", 4],
+  min(jk[, "settle"]), max(jk[, "settle"]), ctL["settle", 1], ctL["settle", 4]))
+```
+
+How to read the diagnostics:
+
+1. **Firm heterogeneity is the first-order problem.** Pooled residuals are strongly firm-specific, and
+   Hausman rejects RE for non-life. Two-way FE is the appropriate model.
+2. **Residual distribution.** Check the Q-Q plot and the JB test for heavy tails. Any firm-years flagged in the
+   Cook's distance table are re-tested in the trimmed refit.
+3. **Heteroskedasticity, serial correlation and cross-sectional dependence.** Whatever the tests show, inference
+   already uses firm-clustered SEs (robust to heteroskedasticity and within-firm serial correlation) and a wild
+   cluster bootstrap (robust to few clusters). Year effects absorb common shocks.
+4. **Robustness of the headline result.** The settlement effect on 13th-month lapse should be judged by the
+   jackknife range and the trimmed refit. The mis-selling coefficient is not robust in any specification.
+
+
+## Diagnostic findings for this data
+
+These are the results produced by the hard-coded data above. The bootstrap p-values vary slightly with the number of draws.
+
+| Check | Spec A: Lapse13 (non-life) | Spec C: Mis-selling | Spec L1: Lapse13 (life) |
+|---|---|---|---|
+| Firm heterogeneity | Firm identity explains 41% of pooled residual variance and 0% of TWFE residual variance; Hausman $\chi^2=80.5$, $p<0.001$ | Hausman $p=0.07$ | Hausman $p=0.47$ |
+| Normality | Shapiro $p=0.10$, JB $p=0.46$: acceptable | Heavy tails (excess kurtosis 3.2, JB $p<0.001$) | Acceptable (JB $p=0.92$) |
+| Heteroskedasticity (BP, slopes) | $p=0.03$ | $p=0.61$ | $p=0.03$ |
+| Functional form (RESET) | $p=0.34$: fine | $p<0.001$: linear model inadequate | $p=0.26$ |
+| Serial correlation (Wooldridge) | $p=0.03$ | $p<0.001$ | $p=0.16$ |
+| Cross-sectional dependence (CD, two-way) | $p=0.63$: absorbed by year effects | $p=0.88$ | $p=0.36$ |
+| Influence | Leave-one-firm-out settlement range $[-0.116,-0.076]$; never changes sign. Dropping 8 flagged firm-years gives $-0.123$ | -- | -- |
+
+What this means:
+
+* **Spec A (settlement and 13th-month lapse) is well specified.** The residuals are close to normal, the
+  functional form is adequate and no single insurer drives the result. The heteroskedasticity and serial
+  correlation found are handled by firm-clustered standard errors; the wild bootstrap gives $p \approx 0.05$.
+  The settlement effect is negative in every leave-one-out fit and gets *stronger* when outliers are trimmed.
+* **Spec C (mis-selling as outcome) fails the diagnostics.** It has heavy tails, fails RESET and shows strong
+  serial correlation. Mis-selling is bounded at zero, rounded to 1 bp and mostly 1--2 bp, so a linear FE model
+  is a poor description. Its null result reflects data limitations rather than a precise zero. A count or
+  fractional-response model on the underlying cancellation counts would be the right next step if counts can be obtained.
+* **Mis-selling in Spec A** is fragile. Dropping AIG alone moves its coefficient from $-0.70$ to $-0.06$.
+* **Standard errors.** `plm`'s Arellano HC1 cluster SEs are slightly smaller than `linearmodels` in the PDF
+  report (0.031 vs. 0.037 for settlement) because the two packages use different small-sample corrections.
+  The bootstrap p-values agree.
+
+```{r session}
+sessionInfo()
+```
