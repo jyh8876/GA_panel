@@ -1,0 +1,82 @@
+# ---- Secrets / credentials / private info ----
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+id_rsa*
+id_ed25519*
+secrets.*
+credentials*
+*token*
+.netrc
+.aws/
+.ssh/
+.claude/settings.local.json
+
+# ---- Documents (LaTeX, PDF, Office docs) ----
+*.tex
+*.pdf
+*.doc
+*.docx
+*.dot
+*.dotx
+*.odt
+*.rtf
+*.ppt
+*.pptx
+*.xls
+*.xlsx
+*.xlsm
+*.pages
+*.key.zip
+
+# ---- LaTeX build artifacts ----
+*.aux
+*.log
+*.out
+*.toc
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.bbl
+*.blg
+*.lof
+*.lot
+*.nav
+*.snm
+*.vrb
+
+# ---- Archives ----
+*.zip
+*.tar
+*.tar.gz
+*.7z
+*.rar
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ipynb_checkpoints/
+.pytest_cache/
+.mypy_cache/
+
+# ---- Quarto / R ----
+.Rproj.user/
+.Rhistory
+.RData
+*_files/
+.quarto/
+panel_analysis.html
+
+# ---- OS / editor ----
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*~
